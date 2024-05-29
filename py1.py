@@ -1,44 +1,58 @@
 import pygame
 import random
 import sqlite3
-import time
 
 # Initialize Pygame
 pygame.init()
 
+# Set up some constants
+WIDTH, HEIGHT = 800, 600
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+PLAYER_SIZE = 50
+MONSTER_SIZE = 50
+HEART_SIZE = 20
+PLAYER_SPEED = 5
+MONSTER_SPEED = 2
+HEART_SPEED = 10
+
 # Set up the display
-screen_width = 800
-screen_height = 600
-screen = pygame.display.set_mode((screen_width, screen_height))
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
-# Set up the title of the window
-pygame.display.set_caption("Survival Game")
-
-# Set up the player
-player = pygame.Rect(screen_width / 2, screen_height / 2, 50, 50)
-
-# Set up the monsters
-monsters = [pygame.Rect(random.choice([-100, screen_width]), random.randint(0, screen_height), 50, 50) for _ in range(5)]
-
-# Set up the red heart
-red_heart = pygame.Rect(-100, random.randint(0, screen_height), 50, 50)
-
-# Set up the timer
-start_time = time.time()
+# Set up the font
 font = pygame.font.Font(None, 36)
 
-# Set up the survival time
-survival_time = 0
-best_survival_time = 0
+# Set up the player
+player = pygame.Rect(WIDTH / 2, HEIGHT / 2, PLAYER_SIZE, PLAYER_SIZE)
+
+# Set up the monsters
+monsters = [pygame.Rect(random.choice([-MONSTER_SIZE, WIDTH]), random.randint(0, HEIGHT - MONSTER_SIZE), MONSTER_SIZE, MONSTER_SIZE) for _ in range(10)]
+
+# Set up the heart
+heart = pygame.Rect(-HEART_SIZE, random.randint(0, HEIGHT - HEART_SIZE), HEART_SIZE, HEART_SIZE)
+heart_appear_time = 0
+
+# Set up the game variables
+lives = 1
+score = 0
+best_score = 0
 
 # Connect to the database
-conn = sqlite3.connect("survival_game.db")
-cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS survival_time (time REAL)")
+conn = sqlite3.connect('survival_game.db')
+c = conn.cursor()
+c.execute('CREATE TABLE IF NOT EXISTS scores (score REAL)')
 conn.commit()
+
+# Get the best score from the database
+c.execute('SELECT MAX(score) FROM scores')
+row = c.fetchone()
+if row[0] is not None:
+    best_score = row[0]
 
 # Game loop
 running = True
+clock = pygame.time.Clock()
+start_time = pygame.time.get_ticks()
 while running:
     # Event handling
     for event in pygame.event.get():
@@ -48,52 +62,99 @@ while running:
     # Move the player
     keys = pygame.key.get_pressed()
     if keys[pygame.K_UP]:
-        player.y -= 5
+        player.y -= PLAYER_SPEED
     if keys[pygame.K_DOWN]:
-        player.y += 5
+        player.y += PLAYER_SPEED
     if keys[pygame.K_LEFT]:
-        player.x -= 5
+        player.x -= PLAYER_SPEED
     if keys[pygame.K_RIGHT]:
-        player.x += 5
+        player.x += PLAYER_SPEED
 
     # Move the monsters
     for monster in monsters:
-        if monster.x < 0:
-            monster.x = screen_width
-        elif monster.x > screen_width:
-            monster.x = -100
-        else:
-            monster.x += random.choice([-5, 5])
+        if monster.x < player.x:
+            monster.x += MONSTER_SPEED
+        elif monster.x > player.x:
+            monster.x -= MONSTER_SPEED
+        if monster.y < player.y:
+            monster.y += MONSTER_SPEED
+        elif monster.y > player.y:
+            monster.y -= MONSTER_SPEED
 
-    # Move the red heart
-    if red_heart.x < 0:
-        red_heart.x = screen_width
-    else:
-        red_heart.x -= 10
-
-    # Collision detection
+    # Check for collisions with monsters
     for monster in monsters:
         if player.colliderect(monster):
-            survival_time = time.time() - start_time
-            cursor.execute("INSERT INTO survival_time VALUES (?)", (survival_time,))
-            conn.commit()
-            cursor.execute("SELECT MAX(time) FROM survival_time")
-            best_survival_time = cursor.fetchone()[0]
-            print(f"Game over! Survival time: {survival_time:.2f} seconds. Best survival time: {best_survival_time:.2f} seconds.")
-            running = False
+            if lives > 0:
+                lives -= 1
+            else:
+                running = False
+
+    # Move the heart
+    if heart.x < WIDTH:
+        heart.x += HEART_SPEED
+    else:
+        heart.x = -HEART_SIZE
+        heart.y = random.randint(0, HEIGHT - HEART_SIZE)
+        heart_appear_time = pygame.time.get_ticks() + 30000
+
+    # Check for collision with the heart
+    if player.colliderect(heart):
+        lives += 1
+        heart.x = -HEART_SIZE
+        heart.y = random.randint(0, HEIGHT - HEART_SIZE)
+        heart_appear_time = pygame.time.get_ticks() + 30000
+
+    # Check if the heart should appear
+    if pygame.time.get_ticks() > heart_appear_time:
+        heart.x = -HEART_SIZE
+        heart.y = random.randint(0, HEIGHT - HEART_SIZE)
+        heart_appear_time = pygame.time.get_ticks() + 30000
+
+    # Check if the monsters should speed up
+    if pygame.time.get_ticks() - start_time > 10000:
+        MONSTER_SPEED += 1
+        start_time = pygame.time.get_ticks()
+
+    # Check if new monsters should be added
+    if len(monsters) < 10 + (pygame.time.get_ticks() - start_time) // 10000:
+        monsters.append(pygame.Rect(random.choice([-MONSTER_SIZE, WIDTH]), random.randint(0, HEIGHT - MONSTER_SIZE), MONSTER_SIZE, MONSTER_SIZE))
+
+    # Remove monsters that are off the screen
+    monsters = [monster for monster in monsters if 0 < monster.x < WIDTH]
 
     # Draw everything
-    screen.fill((255, 255, 255))
-    pygame.draw.rect(screen, (0, 0, 255), player)
+    screen.fill((0, 0, 0))
+    pygame.draw.rect(screen, WHITE, player)
     for monster in monsters:
-        pygame.draw.rect(screen, (255, 0, 0), monster)
-    pygame.draw.rect(screen, (255, 0, 0), red_heart)
-    timer_text = font.render(f"Survival time: {time.time() - start_time:.2f} seconds", True, (0, 0, 0))
-    screen.blit(timer_text, (10, 10))
+        pygame.draw.rect(screen, WHITE, monster)
+    pygame.draw.rect(screen, RED, heart)
+    text = font.render(f'Time: {(pygame.time.get_ticks() - start_time) / 1000:.2f} seconds', True, WHITE)
+    screen.blit(text, (10, 10))
     pygame.display.flip()
 
     # Cap the frame rate
-    pygame.time.delay(1000 // 60)
+    clock.tick(60)
+
+# Save the score to the database
+c.execute('INSERT INTO scores VALUES (?)', ((pygame.time.get_ticks() - start_time) / 1000,))
+conn.commit()
+
+# Get the best score from the database
+c.execute('SELECT MAX(score) FROM scores')
+row = c.fetchone()
+if row[0] is not None:
+    best_score = row[0]
+
+# Show the game over screen
+screen.fill((0, 0, 0))
+text = font.render('Game Over', True, WHITE)
+screen.blit(text, (WIDTH / 2 - 50, HEIGHT / 2 - 50))
+text = font.render(f'You survived for {(pygame.time.get_ticks() - start_time) / 1000:.2f} seconds', True, WHITE)
+screen.blit(text, (WIDTH / 2 - 100, HEIGHT / 2))
+text = font.render(f'Best survival time: {best_score:.2f} seconds', True, WHITE)
+screen.blit(text, (WIDTH / 2 - 100, HEIGHT / 2 + 50))
+pygame.display.flip()
+pygame.time.wait(2000)
 
 # Quit Pygame
 pygame.quit()
